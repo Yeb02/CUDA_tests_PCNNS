@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="PC">
+      <UniqueIdentifier>{0d376141-872c-4b0b-9d79-8e9be3275c80}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <Filter>PC</Filter>
+    </ClCompile>
+    <ClCompile Include="PCNN.cpp">
+      <Filter>PC</Filter>
+    </ClCompile>
+    <ClCompile Include="Random.cpp">
+      <Filter>PC</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="PCNN.h">
+      <Filter>PC</Filter>
+    </ClInclude>
+    <ClInclude Include="Random.h">
+      <Filter>PC</Filter>
+    </ClInclude>
+    <ClInclude Include="MNIST.h">
+      <Filter>PC</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
