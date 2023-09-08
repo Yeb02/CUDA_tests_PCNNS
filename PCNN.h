@@ -20,9 +20,14 @@ private:
 	std::vector<float*> thetas;
 
 	float* buffer; // array to store temporary values during inference.
+
 	
-	// is used before Xs update and between Xs update and thetas update
-	void computeEpsilons(); 
+	bool reversedOrder; // true iff the datapoint is presented at x0 instead of at xL.
+	float* muL;    // only used when the datapoint is presented to x0 and label to xL.
+
+	// is used before Xs update and between Xs update and thetas update. 
+
+	void computeEpsilons();
 
 public:
 
@@ -35,12 +40,12 @@ public:
 		}
 
 		delete[] buffer;	
+		delete[] muL;	
 	}
 
-	PCNN(int _nL, int* _lS, int datasetSize);
+	PCNN(int _nL, int* _lS, int datasetSize, bool reversedOrder);
 
-
-	void initXs(float* x0, float* xL);
+	void initXs(float* datapoint, float* label=nullptr);
 
 	// updates Xs and thetas
 	void iPCStep(float xlr, float tlr);
@@ -52,7 +57,7 @@ public:
 
 		computeEpsilons();
 
-		for (int l = 0; l < nL - 1; l++) {
+		for (int l = 0; l < nL; l++) {
 			for (int dp = 0; dp < dS; dp++) {
 				for (int i = 0; i < lS[l]; i++) {
 					E += powf(epsilons[l][dp * lS[l] + i], 2.0f);

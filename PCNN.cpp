@@ -1,12 +1,15 @@
 #include "PCNN.h"
 
 
-PCNN::PCNN(int _nL, int* _lS, int _dS) : 
-	nL(_nL), lS(_lS), dS(_dS)
+PCNN::PCNN(int _nL, int* _lS, int _dS, bool _reversedOrder) : 
+	nL(_nL), lS(_lS), dS(_dS), reversedOrder(_reversedOrder)
 {
 	Xs.resize(nL);
 	epsilons.resize(nL);
 	thetas.resize(nL);
+
+	if (reversedOrder) muL = new float[dS * lS[nL - 1]];
+	else muL = nullptr;
 
 	Xs[0] = new float[dS * lS[0]];
 	epsilons[0] = new float[dS * lS[0]];
@@ -29,15 +32,27 @@ PCNN::PCNN(int _nL, int* _lS, int _dS) :
 	buffer = new float[lSmax];
 }
 
-void PCNN::initXs(float* x0, float* xL)
+void PCNN::initXs(float* datapoint, float* label)
 {
-	std::copy(x0, x0 + lS[0] * dS, Xs[0]);
-	std::copy(xL, xL + lS[nL-1] * dS, Xs[nL - 1]);
+	
+
+	if (reversedOrder) {
+		std::copy(datapoint, datapoint + lS[0] * dS, Xs[0]);
+		
+		if (label == nullptr) std::fill(muL, muL + lS[0] * dS, 0.0f);
+		else std::copy(label, label + lS[nL - 1] * dS, muL);
+
+		std::fill(Xs[nL - 1], Xs[nL - 1] + dS * lS[nL - 1], 0.0f);
+	}
+	else {
+		if (label == nullptr) std::fill(Xs[0], Xs[0] + lS[0] * dS, 0.0f); // or random ? TODO
+		else std::copy(label, label + lS[0] * dS, Xs[0]);
+
+		std::copy(datapoint, datapoint + lS[nL - 1] * dS, Xs[nL - 1]);
+	}
 
 	for (int i = 1; i < nL-1; i++)
 	{
-		//std::fill(Xs[i], Xs[i] + dS * lS[i], 0.0f); bad idea.
-
 		float f = powf((float)lS[i], -.5f);
 		for (int j = 0; j < dS * lS[i]; j++) Xs[i][j] = NORMAL_01 * f;
 	}
@@ -66,6 +81,17 @@ void PCNN::computeEpsilons()
 			}
 		}
 
+	}
+
+	//epsilon L must be computed
+	if (reversedOrder) {
+		for (int dp = 0; dp < dS; dp++)
+		{
+			int offset = dp * lS[nL - 1];
+			for (int j = 0; j < lS[nL - 1]; j++) {
+				epsilons[nL - 1][offset + j] = Xs[nL - 1][offset + j] - muL[offset + j];
+			}
+		}
 	}
 }
 
@@ -208,6 +234,37 @@ void PCNN::infer_Forward_DataInXL(float xlr, bool training)
 			x_offset = lS[0] * dp;
 			for (int i = 0; i < lS[0]; i++) {
 				Xs[0][x_offset + i] -= xlr * epsilons[0][x_offset + i];
+			}
+		}
+	}
+}
+
+
+void PCNN::infer_Simultaneous_DataInX0(float xlr, bool training)
+{
+	computeEpsilons();
+
+	if (!training) {
+		std::fill(epsilons[nL - 1], epsilons[nL - 1] + dS * lS[nL - 1], 0.0f);
+	}
+
+	// delta xl for l in [1,L]
+	for (int i = 1; i < nL; i++)
+	{
+		for (int dp = 0; dp < dS; dp++)
+		{
+
+			int e_offset = dp * lS[i - 1];
+			int x_offset = dp * lS[i];
+
+			for (int j = 0; j < lS[i]; j++) {
+				float s = 0.0f;
+				for (int k = 0; k < lS[i - 1]; k++) {
+					s += thetas[i][j + k * lS[i]] * epsilons[i - 1][e_offset + k];
+				}
+
+				float dfx = 1.0f - powf(tanhf(Xs[i][x_offset + j]), 2.0f);
+				Xs[i][x_offset + j] += xlr * (dfx * s - epsilons[i][x_offset + j]);
 			}
 		}
 	}
