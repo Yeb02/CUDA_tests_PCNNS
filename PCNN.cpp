@@ -29,6 +29,9 @@ PCNN::PCNN(int _nL, int* _lS, int _dS, bool _reversedOrder) :
 		if (lS[i] > lSmax) lSmax = lS[i];
 	}
 
+	if (reversedOrder) output = Xs[nL-1];
+	else output = Xs[0];
+
 	buffer = new float[lSmax];
 }
 
@@ -156,7 +159,7 @@ void PCNN::learn_Simultaneous_DataInXL(float tlr)
 
 void PCNN::infer_Forward_DataInXL(float xlr, bool training)
 {
-	for (int l = nL-1; l > 0; l--)
+	for (int l = nL-2; l > 0; l--)
 	{
 		for (int dp = 0; dp < dS; dp++)
 		{

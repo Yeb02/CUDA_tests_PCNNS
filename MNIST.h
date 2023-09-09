@@ -11,7 +11,7 @@ float** read_mnist_images(std::string full_path, int number_of_images) {
         return ((int)c1 << 24) + ((int)c2 << 16) + ((int)c3 << 8) + c4;
     };
 
-    
+
 
     std::ifstream file(full_path, std::ios::binary);
 
@@ -29,20 +29,16 @@ float** read_mnist_images(std::string full_path, int number_of_images) {
 
         int image_size = n_rows * n_cols;
 
-        char* buffer = new char[image_size];
+        unsigned char* buffer = new unsigned char[image_size];
         float** dataset = new float* [number_of_images];
         for (int i = 0; i < number_of_images; i++) {
             file.read((char*)buffer, image_size);
             dataset[i] = new float[image_size];
             for (int j = 0; j < image_size; j++) {
-                dataset[i][j] = static_cast<float>(buffer[j]) / 127.5f;
-                /*if (j % 28 == 0)std::cout << std::endl;
-                std::cout << static_cast<float>(buffer[j]) << " ";*/
-                
+                dataset[i][j] = static_cast<float>(buffer[j]) / 127.5f - 1.0f;
             }
-            //std::cout << std::endl;
         }
-        
+
         delete[] buffer;
 
         return dataset;
@@ -70,15 +66,16 @@ float** read_mnist_labels(std::string full_path, int number_of_labels) {
 
         file.read((char*)&number_of_labels, sizeof(number_of_labels)), number_of_labels = reverseInt(number_of_labels);
 
-        float** dataset = new float*[number_of_labels];
+        float** dataset = new float* [number_of_labels];
         char* buffer = new char[number_of_labels];
         file.read(buffer, number_of_labels);
         for (int i = 0; i < number_of_labels; i++) {
             dataset[i] = new float[10];
-            std::fill(dataset[i], dataset[i] + 10, -1.0f);
+            std::fill(dataset[i], dataset[i] + 10, .0f);
+            //std::fill(dataset[i], dataset[i] + 10, -1.0f);
             dataset[i][buffer[i]] = 1.0f;
         }
-        
+
         delete[] buffer;
         return dataset;
     }
@@ -86,3 +83,4 @@ float** read_mnist_labels(std::string full_path, int number_of_labels) {
         throw std::runtime_error("Unable to open file `" + full_path + "`!");
     }
 }
+

@@ -31,6 +31,8 @@ private:
 
 public:
 
+	float* output;
+
 	~PCNN() 
 	{
 		for (int i = 0; i < nL; i++) {
