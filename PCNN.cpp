@@ -29,10 +29,11 @@ PCNN::PCNN(int _nL, int* _lS, int _dS, bool _reversedOrder) :
 		if (lS[i] > lSmax) lSmax = lS[i];
 	}
 
+	buffer = new float[lSmax];
+
 	if (reversedOrder) output = Xs[nL-1];
 	else output = Xs[0];
 
-	buffer = new float[lSmax];
 }
 
 void PCNN::initXs(float* datapoint, float* label)
@@ -42,7 +43,7 @@ void PCNN::initXs(float* datapoint, float* label)
 	if (reversedOrder) {
 		std::copy(datapoint, datapoint + lS[0] * dS, Xs[0]);
 		
-		if (label == nullptr) std::fill(muL, muL + lS[0] * dS, 0.0f);
+		if (label == nullptr) std::fill(muL, muL + lS[nL - 1] * dS, 0.0f);
 		else std::copy(label, label + lS[nL - 1] * dS, muL);
 
 		std::fill(Xs[nL - 1], Xs[nL - 1] + dS * lS[nL - 1], 0.0f);
@@ -86,7 +87,7 @@ void PCNN::computeEpsilons()
 
 	}
 
-	//epsilon L must be computed
+	//if reversedOrder epsilon L must be computed
 	if (reversedOrder) {
 		for (int dp = 0; dp < dS; dp++)
 		{
@@ -98,7 +99,32 @@ void PCNN::computeEpsilons()
 	}
 }
 
+float PCNN::computeEnergy()
+{
+	float E = 0.0f;
 
+	computeEpsilons();
+
+	// epsilon 0 is not relevant in reversed order
+	// (unless we are feeding corrupted / partial inputs 
+	// to x0, which is not the case yet). When it is the 
+	// case the "inference" functions must be modified so 
+	// as to implement the delta x0 change.
+	int first_l = reversedOrder ? 1 : 0;
+
+	// epsilon L is relevant only in reversed order.
+	int last_l = reversedOrder ? nL : nL-1;
+
+	for (int l = first_l; l < last_l; l++) {
+		for (int dp = 0; dp < dS; dp++) {
+			for (int i = 0; i < lS[l]; i++) {
+				E += powf(epsilons[l][dp * lS[l] + i], 2.0f);
+			}
+		}
+	}
+
+	return E;
+}
 
 void PCNN::infer_Simultaneous_DataInXL(float xlr, bool training)
 {
@@ -136,20 +162,20 @@ void PCNN::infer_Simultaneous_DataInXL(float xlr, bool training)
 	}
 }
 
-void PCNN::learn_Simultaneous_DataInXL(float tlr)
+void PCNN::learn_Simultaneous_DataInXL(float tlr, float regularization)
 {
 	computeEpsilons();
 
-	for (int i = 1; i < nL; i++)
+	for (int l = 1; l < nL; l++)
 	{
-		for (int j = 0; j < lS[i-1]; j++) {
-			for (int k = 0; k < lS[i]; k++) {
+		for (int j = 0; j < lS[l-1]; j++) {
+			for (int k = 0; k < lS[l]; k++) {
 				float s = 0.0f;
 				for (int dp = 0; dp < dS; dp++)
 				{
-					s += Xs[i][dp * lS[i] + k] * epsilons[i - 1][dp * lS[i - 1] + j];
+					s += Xs[l][dp * lS[l] + k] * epsilons[l - 1][dp * lS[l - 1] + j];
 				}
-				thetas[i][j * lS[i] + k] += tlr * s;
+				thetas[l][j * lS[l] + k] = tlr * s + regularization * thetas[l][j * lS[l] + k];
 			}
 		}
 	}
@@ -243,6 +269,7 @@ void PCNN::infer_Forward_DataInXL(float xlr, bool training)
 }
 
 
+
 void PCNN::infer_Simultaneous_DataInX0(float xlr, bool training)
 {
 	computeEpsilons();
@@ -251,26 +278,45 @@ void PCNN::infer_Simultaneous_DataInX0(float xlr, bool training)
 		std::fill(epsilons[nL - 1], epsilons[nL - 1] + dS * lS[nL - 1], 0.0f);
 	}
 
-	// delta xl for l in [1,L]
-	for (int i = 1; i < nL; i++)
+	// delta xl for l in [1,L]. delta x0 is to be considered iff x0 is fixed 
+	// (at least partially) to a corrupted / partial input, which is not the case yet.
+	// If it changes, epsilon 0 must be considered in computeEnergy()
+	for (int l = 1; l < nL; l++)
 	{
 		for (int dp = 0; dp < dS; dp++)
 		{
 
-			int e_offset = dp * lS[i - 1];
-			int x_offset = dp * lS[i];
+			int e_offset = dp * lS[l - 1];
+			int x_offset = dp * lS[l];
 
-			for (int j = 0; j < lS[i]; j++) {
+			for (int j = 0; j < lS[l]; j++) {
 				float s = 0.0f;
-				for (int k = 0; k < lS[i - 1]; k++) {
-					s += thetas[i][j + k * lS[i]] * epsilons[i - 1][e_offset + k];
+				for (int k = 0; k < lS[l - 1]; k++) {
+					s += thetas[l][j + k * lS[l]] * epsilons[l - 1][e_offset + k];
 				}
 
-				float dfx = 1.0f - powf(tanhf(Xs[i][x_offset + j]), 2.0f);
-				Xs[i][x_offset + j] += xlr * (dfx * s - epsilons[i][x_offset + j]);
+				float dfx = 1.0f - powf(tanhf(Xs[l][x_offset + j]), 2.0f);
+				Xs[l][x_offset + j] += xlr * (dfx * s - epsilons[l][x_offset + j]);
 			}
 		}
 	}
 }
 
+// same as learn_Simultaneous_DataInXL
+void PCNN::learn_Simultaneous_DataInX0(float tlr, float regularization) {
+	computeEpsilons();
 
+	for (int l = 1; l < nL; l++)
+	{
+		for (int j = 0; j < lS[l - 1]; j++) {
+			for (int k = 0; k < lS[l]; k++) {
+				float s = 0.0f;
+				for (int dp = 0; dp < dS; dp++)
+				{
+					s += Xs[l][dp * lS[l] + k] * epsilons[l - 1][dp * lS[l - 1] + j];
+				}
+				thetas[l][j * lS[l] + k] = tlr * s + regularization * thetas[l][j * lS[l] + k];
+			}
+		}
+	}
+}

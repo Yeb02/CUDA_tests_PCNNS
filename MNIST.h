@@ -71,8 +71,7 @@ float** read_mnist_labels(std::string full_path, int number_of_labels) {
         file.read(buffer, number_of_labels);
         for (int i = 0; i < number_of_labels; i++) {
             dataset[i] = new float[10];
-            std::fill(dataset[i], dataset[i] + 10, .0f);
-            //std::fill(dataset[i], dataset[i] + 10, -1.0f);
+            std::fill(dataset[i], dataset[i] + 10, -1.0f);
             dataset[i][buffer[i]] = 1.0f;
         }
 

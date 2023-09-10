@@ -53,22 +53,7 @@ public:
 	void iPCStep(float xlr, float tlr);
 
 	// for testing purposes only
-	float computeEnergy()
-	{
-		float E = 0.0f;
-
-		computeEpsilons();
-
-		for (int l = 0; l < nL; l++) {
-			for (int dp = 0; dp < dS; dp++) {
-				for (int i = 0; i < lS[l]; i++) {
-					E += powf(epsilons[l][dp * lS[l] + i], 2.0f);
-				}
-			}
-		}
-
-		return E;
-	}
+	float computeEnergy();
 
 
 
@@ -77,7 +62,7 @@ public:
 	void infer_Simultaneous_DataInXL(float xlr, bool training);
 
 	// updates all thetas simultaneously, when xL is the datapoint 
-	void learn_Simultaneous_DataInXL(float tlr);
+	void learn_Simultaneous_DataInXL(float tlr, float regularization);
 
 
 
@@ -85,7 +70,7 @@ public:
 	void infer_Forward_DataInXL(float xlr, bool training);
 
 	// updates thetas in a forward fashion, when xL is the datapoint 
-	void learn_Forward_DataInXL(float tlr);
+	void learn_Forward_DataInXL(float tlr, float regularization);
 
 
 
@@ -93,7 +78,7 @@ public:
 	void infer_Simultaneous_DataInX0(float xlr, bool training);
 
 	// updates all thetas simultaneously, when x0 is the datapoint 
-	void learn_Simultaneous_DataInX0(float tlr);
+	void learn_Simultaneous_DataInX0(float tlr, float regularization);
 
 
 
@@ -101,7 +86,7 @@ public:
 	void infer_Forward_DataInX0(float xlr, bool training);
 
 	// updates thetas in a forward fashion, when x0 is the datapoint 
-	void learn_Forward_DataInX0(float tlr);
+	void learn_Forward_DataInX0(float tlr, float regularization);
 
 };
 

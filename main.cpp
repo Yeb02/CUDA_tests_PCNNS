@@ -33,7 +33,7 @@ int main() {
 	const int nL = 3;
 	int lS[nL] = { labelS, 10, datapointS };
 
-	bool reversedOrder = false;
+	const bool reversedOrder = false;
 
 	if (reversedOrder) 
 	{
@@ -46,28 +46,46 @@ int main() {
 
 
 	const int batchSize = 1;
-	PCNN nn(nL, lS, batchSize, reversedOrder);
+	PCNN nn(nL, lS, batchSize, reversedOrder); // TODO regularize
 
-	float xlr = .03f / (float) batchSize;
-	float tlr = .002f / (float) batchSize;
+	float xlr = .015f / (float) batchSize;
+	float tlr = .0005f / (float) batchSize;
+	float regularization = 1.0f - .000f;
 
 	ParamsDump pd;
 	pd.copyPCNNsThetas(nn);
 
-	int nInferenceSteps = 30;
+	int nInferenceSteps = 70;
+	int nEpochs = 100;
 
-	const int nTrainSamples = 600, nTestSamples = 100, mlpBatchSize = 10;
-	for (int e = 0 ;; e++)
+	const int nTrainSamples = 60000, nTestSamples = 3000, mlpBatchSize = 10;
+	for (int e = 0 ; e < nEpochs; e++)
 	{
 
 		float avgL = 0.0f;
+		for (int sid = 0; sid < nTrainSamples; sid++) { 
+
+			nn.initXs(trainDatapoints[sid], trainLabels[sid]);
+
+			for (int i = 0; i < nInferenceSteps; i++) {
+				if (reversedOrder) nn.infer_Simultaneous_DataInX0(xlr, true);
+				else nn.infer_Simultaneous_DataInXL(xlr, true);
+			}
+			if (reversedOrder) nn.learn_Simultaneous_DataInX0(tlr, regularization);
+			else nn.learn_Simultaneous_DataInXL(tlr, regularization);
+
+			/*avgL += mlp.forward(trainDatapoints[sid], trainLabels[sid], true);
+			if ((sid-1)% mlpBatchSize == 0) mlp.updateParams(.1f/(float)mlpBatchSize, .000f, .0f);*/
+		}
+
 		int nCorrectAnswers = 0;
 		for (int sid = 0; sid < nTestSamples; sid++)
 		{
 			nn.initXs(testDatapoints[sid], nullptr);
 
 			for (int i = 0; i < nInferenceSteps; i++) {
-				nn.infer_Simultaneous_DataInXL(xlr, false);
+				if (reversedOrder) nn.infer_Simultaneous_DataInX0(xlr, false);
+				else nn.infer_Simultaneous_DataInXL(xlr, false);
 			}
 
 			for (int i = 0; i < 10; i++)
@@ -75,54 +93,49 @@ int main() {
 				avgL += powf(nn.output[i] - testLabels[sid][i], 2.0f);
 			}
 			nCorrectAnswers += isCorrectAnswer(nn.output, testLabels[sid]);
-			
+
 
 			/*mlp.forward(testDatapoints[sid], testLabels[sid], false);
 			nCorrectAnswers += isCorrectAnswer(mlp.output, testLabels[sid]);*/
 		}
 
+		std::cout << "Epoch " << e << " , train loss " << avgL / (float)nTrainSamples
+			<< " , test accuracy " << (float)nCorrectAnswers / (float)nTestSamples << std::endl;
+	}
 
-		for (int sid = 0; sid < nTrainSamples; sid++) { 
 
-			nn.initXs(trainDatapoints[sid], trainLabels[sid]);
+	int sampleID = INT_0X(10000);
+	nn.initXs(testDatapoints[sampleID], testLabels[sampleID]);
+	pd.copyPCNNsXs(nn);
 
-			for (int i = 0; i < nInferenceSteps; i++) {
-				nn.infer_Simultaneous_DataInXL(xlr, true);
-			}
-			nn.learn_Simultaneous_DataInXL(tlr);
 
-			/*avgL += mlp.forward(trainDatapoints[sid], trainLabels[sid], true);
-			if ((sid-1)% mlpBatchSize == 0) mlp.updateParams(1.0f/(float)mlpBatchSize, .000f, .0f);*/
+	
+	if (reversedOrder) {
+
+		for (int i = 0; i < nInferenceSteps; i++) {
+			std::cout << nn.computeEnergy() << std::endl;
+			nn.infer_Simultaneous_DataInX0(xlr, true);
 		}
 
-		std::cout << "Epoch " << e << " , train loss after SGD " << avgL / (float)nTrainSamples
-			<< " , test accuracy before SGD " << (float)nCorrectAnswers / (float)nTestSamples << std::endl;
+	}
+	else {
+
+		for (int i = 0; i < nInferenceSteps; i++) {
+			std::cout << nn.computeEnergy() << std::endl;
+			nn.infer_Forward_DataInXL(xlr, true);
+		}
+
+		std::cout << "\n\n" << std::endl;
+
+		pd.setPCNNsThetas(nn);
+		pd.setPCNNsXs(nn);
+		for (int i = 0; i < nInferenceSteps; i++) {
+			std::cout << nn.computeEnergy() << std::endl;
+			nn.infer_Simultaneous_DataInXL(xlr, true);
+		}
 	}
 
-
-	//int sampleID = INT_0X(10000);
-	//nn.initXs(testDatapoints[sampleID], testLabels[sampleID]);
-	//pd.copyPCNNsXs(nn);
-
-
-	/*for (int i = 0; i < nSteps; i++) {
-		std::cout << nn.computeEnergy() << std::endl;
-		nn.infer_Simultaneous_DataInX0(xlr, true);
-	}*/
-
-	/*for (int i = 0; i < nSteps; i++) {
-		std::cout << nn.computeEnergy() << std::endl;
-		nn.infer_Forward_DataInXL(xlr, true);
-	}
-
-	std::cout << "\n\n" << std::endl;
-
-	pd.setPCNNsThetas(nn);
-	pd.setPCNNsXs(nn);
-	for (int i = 0; i < nSteps; i++) {
-		std::cout << nn.computeEnergy() << std::endl;
-		nn.infer_Simultaneous_DataInXL(xlr, true);
-	}*/
+	
 
 	return 0;
 }

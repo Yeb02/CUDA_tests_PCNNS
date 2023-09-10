@@ -67,8 +67,8 @@ float Network::forward(float* X, float* Y, bool accGrad)
 				currActs[j] += Ws[i][matID] * prevActs[k];
 				matID++;
 			}
-			currActs[j] = 1.0f / (1 + expf(-currActs[j]));
-			//currActs[j] = tanhf(currActs[j]);
+			//currActs[j] = 1.0f / (1 + expf(-currActs[j]));
+			currActs[j] = tanhf(currActs[j]);
 		}
 
 		prevActs = currActs;
@@ -93,8 +93,8 @@ float Network::forward(float* X, float* Y, bool accGrad)
 
 	for (int i = 0; i < outputSize; i++)
 	{
-		currDelta[i] = (currActs[i] - Y[i]) * (1.0f - currActs[i]) * currActs[i];
-		//currDelta[i] = (currActs[i] - Y[i]) * (1.0f - currActs[i] * currActs[i]);
+		//currDelta[i] = (currActs[i] - Y[i]) * (1.0f - currActs[i]) * currActs[i];
+		currDelta[i] = (currActs[i] - Y[i]) * (1.0f - currActs[i] * currActs[i]);
 	}
 
 	for (int i = nLayers - 1; i >= 0; i--) {
@@ -132,8 +132,8 @@ float Network::forward(float* X, float* Y, bool accGrad)
 			}
 		}
 		for (int k = 0; k < sizes[i]; k++) {
-			currDelta[k] *= (1.0f - currActs[k]) * currActs[k];
-			//currDelta[k] *= (1.0f - currActs[k] * currActs[k]);
+			//currDelta[k] *= (1.0f - currActs[k]) * currActs[k];
+			currDelta[k] *= (1.0f - currActs[k] * currActs[k]);
 		}
 
 	}
