@@ -1,9 +1,17 @@
 #pragma once
 
+#ifdef _DEBUG
+#define _CRT_SECURE_NO_WARNINGS
+#include <float.h>
+unsigned int fp_control_state = _controlfp(_EM_UNDERFLOW | _EM_INEXACT, _MCW_EM);
+#endif
+
 
 #include "PCNN.h"
 #include "Network.h"
 #include "MNIST.h"
+
+#include <iomanip>
 
 int isCorrectAnswer(float* out, float* y) {
 	float outMax = -1000.0f;
@@ -30,51 +38,56 @@ int main() {
 	float** trainLabels = read_mnist_labels("MNIST\\train-labels-idx1-ubyte", 60000);
 	float** trainDatapoints = read_mnist_images("MNIST\\train-images-idx3-ubyte", 60000);
 
-	const int nL = 5;
-	int lS[nL] = { labelS, 10, 10, 10, datapointS };
+	const int nL = 3;
+	int layerSizes[nL] = { labelS, 10, datapointS };
 
 	const bool reversedOrder = true;
 
 	if (reversedOrder) 
 	{
 		int temp_lS[nL] = {0};
-		for (int i = 0; i < nL; i++) temp_lS[i] = lS[i];
-		for (int i = 0; i < nL; i++) lS[nL-1-i] = temp_lS[i];
+		for (int i = 0; i < nL; i++) temp_lS[i] = layerSizes[i];
+		for (int i = 0; i < nL; i++) layerSizes[nL-1-i] = temp_lS[i];
 	}
 
+	const int batchSize = 1; 
 
+	const float xlr = .025f / (float)batchSize;
+	const float tlr = .005f / (float)batchSize; // i have noticed that if x has not converged (iPC, ...),
+	const float regularization = 1.0f - .000f; // ,tlr must be tiny, otherwise thetas explode.
 
-	const int batchSize = 1;
-	PCNN nn(nL, lS, batchSize, reversedOrder); // TODO regularize
-
-	float xlr = .02f / (float) batchSize;
-	float tlr = .01f / (float) batchSize;
-	float regularization = 1.0f - .000f;
-
+	const bool corruptedInput = false;
+	PCNN nn(nL-1, layerSizes, batchSize, reversedOrder, corruptedInput); // TODO regularize
 	ParamsDump pd;
 	pd.copyPCNNsThetas(nn);
 
-	int nInferenceSteps = 10;
-	int nEpochs = 0;
 
-	const int nTrainSamples = 1000, nTestSamples = 300;
+	const int nInferenceSteps = 30;
+	const int nEpochs = 1000;
+	const int nTrainSamples = 5000, nTestSamples = 300;
 	for (int e = 0 ; e < nEpochs; e++)
 	{
 
-		float avgL = 0.0f;
-		for (int sid = 0; sid < nTrainSamples; sid++) { 
+		auto [batchedPoints, batchedLabels] = create_batches(trainDatapoints, trainLabels, nTrainSamples, batchSize);
+		int nBatches = nTestSamples / batchSize;
 
-			nn.initXs(trainDatapoints[sid], trainLabels[sid]);
+		
+		nn.batchSize = batchSize;
+		for (int sid = 0; sid < nBatches; sid++) {
+
+			nn.initXs(batchedPoints[sid], batchedLabels[sid]);
 
 			for (int i = 0; i < nInferenceSteps; i++) {
 				if (reversedOrder) nn.infer_Simultaneous_DataInX0(xlr, true);
 				else nn.infer_Simultaneous_DataInXL(xlr, true);
 			}
-			if (reversedOrder) nn.learn_DataInX0(tlr, regularization);
-			else nn.learn_DataInXL(tlr, regularization);
+			nn.learn(tlr, regularization);
+			
 		}
 
+		float avgL = 0.0f;
 		int nCorrectAnswers = 0;
+		nn.batchSize = 1;
 		for (int sid = 0; sid < nTestSamples; sid++)
 		{
 			nn.initXs(testDatapoints[sid], nullptr);
@@ -91,8 +104,15 @@ int main() {
 			nCorrectAnswers += isCorrectAnswer(nn.output, testLabels[sid]);
 		}
 
-		std::cout << "Epoch " << e << " , train loss " << avgL / (float)nTrainSamples
-			<< " , test accuracy " << (float)nCorrectAnswers / (float)nTestSamples << std::endl;
+		std::cout << "Epoch " << e << " , train loss " << std::setprecision(5) << avgL / (float)nTrainSamples
+			<< " , test accuracy " << std::setprecision(4) << (float)nCorrectAnswers / (float)nTestSamples << std::endl;
+
+		for (int i = 0; i < nBatches; i++) {
+			delete[] batchedPoints[i];
+			delete[] batchedLabels[i];
+		}
+		delete[] batchedPoints;
+		delete[] batchedLabels;
 	}
 
 	// testing an MLP's performance on the dataset
@@ -122,45 +142,90 @@ int main() {
 	}
 	
 
-	bool training = false;
-	int sampleID = INT_0X(10000);
-	if (training) nn.initXs(testDatapoints[sampleID], testLabels[sampleID]);
-	else nn.initXs(testDatapoints[sampleID], nullptr);
-	pd.copyPCNNsXs(nn);
+	const bool training = true;
+	const bool iPC = true; 
 
-	
-	if (reversedOrder) {
+	auto [batchedPoints, batchedLabels] = create_batches(testDatapoints, testLabels, nTestSamples, batchSize);
+	int nBatches = nTestSamples / batchSize;
 
+	int sampleID = INT_0X(nBatches);
+	std::cout << sampleID << "\n" << std::endl;
+	if (training) nn.initXs(batchedPoints[sampleID], batchedLabels[sampleID]);
+	else nn.initXs(batchedPoints[sampleID], nullptr);
+	pd.copyPCNNsXs(nn, batchSize);
+
+
+	if (reversedOrder) { 
+		// layerSizes = { labelS, 10, 10, 10, datapointS }, xlr = .25, tlr = .0005f/10.f
+		// preliminary results, a>b means a better than b. 
+		//  
+		// 1 - on the speed of energy minimization (compared after 10 steps)
+		// supervised   (training=true)  : F << B << S
+		// unsupervised (training=false) : F ~= B ~= S
+		// iPC (batchSize=10, supervised): F ~= B ~= S 
+		// 2 - on the minimum of the energy at convergence (compared after 200 steps)
+		// supervised   (training=true)  : F  S  B 
+		// unsupervised (training=false) : F  S  B
+		// iPC (batchSize=10, supervised): F  S  B
+
+		std::cout << "Initial energy: " << nn.computeEnergy(training) << "\n" << std::endl;
 		for (int i = 0; i < nInferenceSteps; i++) {
-			std::cout << nn.computeEnergy() << std::endl;
+			std::cout << "  F " << nn.computeEnergy(training) << std::endl;
 			nn.infer_Forward_DataInX0(xlr, training);
+			if (iPC) nn.learn(tlr, regularization);
 		}
-
-		std::cout << "\n\n" << std::endl;
+		std::cout << "  F " << nn.computeEnergy(training) << "\n" << std::endl;
 
 		pd.setPCNNsThetas(nn);
-		pd.setPCNNsXs(nn);
+		pd.setPCNNsXs(nn, batchSize);
+		//std::cout << "  B " << nn.computeEnergy(training) << std::endl;
 		for (int i = 0; i < nInferenceSteps; i++) {
-			std::cout << nn.computeEnergy() << std::endl;
+			nn.infer_Backward_DataInX0(xlr, training);
+			if (iPC) nn.learn(tlr, regularization);
+		}
+		std::cout << "  B " << nn.computeEnergy(training) << "\n" << std::endl;
+
+		pd.setPCNNsThetas(nn);
+		pd.setPCNNsXs(nn, batchSize);
+		for (int i = 0; i < nInferenceSteps; i++) {
+			//std::cout << "  S " << nn.computeEnergy(training) << std::endl;
 			nn.infer_Simultaneous_DataInX0(xlr, training);
+			if (iPC) nn.learn(tlr, regularization);
 		}
-
+		std::cout << "  S " << nn.computeEnergy(training) << std::endl;
 	}
-	else {
+	else { 
+		// layerSizes = { labelS, 10, 10, 10, datapointS }, xlr = .25, batchSize = 1
+		// preliminary results, a>b means a better than b. 
+		//  
+		// 1 - on the speed of energy minimization (compared after 10 steps)
+		// supervised   (training=true)  : F ~= B ~= S
+		// unsupervised (training=false) : F ~= B ~= S
+		// 2 - on the minimum of the energy at convergence (compared after 200 steps)
+		// supervised   (training=true)  : F ~= B ~= S
+		// unsupervised (training=false) : F ~> B ~> S
 
 		for (int i = 0; i < nInferenceSteps; i++) {
-			std::cout << nn.computeEnergy() << std::endl;
 			nn.infer_Forward_DataInXL(xlr, training);
+			if (iPC) nn.learn(tlr, regularization);
 		}
-
-		std::cout << "\n\n" << std::endl;
+		std::cout << "  F " << nn.computeEnergy(training) << std::endl;
+		
+		pd.setPCNNsThetas(nn);
+		pd.setPCNNsXs(nn, batchSize);
+		for (int i = 0; i < nInferenceSteps; i++) {
+			nn.infer_Backward_DataInXL(xlr, training);
+			if (iPC) nn.learn(tlr, regularization);
+		}
+		std::cout << "  B " << nn.computeEnergy(training) << std::endl;
 
 		pd.setPCNNsThetas(nn);
-		pd.setPCNNsXs(nn);
+		pd.setPCNNsXs(nn, batchSize);
 		for (int i = 0; i < nInferenceSteps; i++) {
-			std::cout << nn.computeEnergy() << std::endl;
 			nn.infer_Simultaneous_DataInXL(xlr, training);
+			if (iPC) nn.learn(tlr, regularization);
 		}
+		std::cout << "  S " << nn.computeEnergy(training) << std::endl;
 	}
 
 	

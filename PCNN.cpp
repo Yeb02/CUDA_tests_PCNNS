@@ -4,9 +4,9 @@
 PCNN::PCNN(int _L, int* _lS, int _dS, bool _reversedOrder, bool _corruptedInput) :
 	L(_L), layerSizes(_lS), batchSize(_dS), reversedOrder(_reversedOrder), corruptedInput(_corruptedInput)
 {
-	Xs.resize(L);
-	epsilons.resize(L);
-	thetas.resize(L);
+	Xs.resize(L+1);
+	epsilons.resize(L+1);
+	thetas.resize(L+1);
 
 	if (reversedOrder) muL = new float[batchSize * layerSizes[L]];
 	else muL = nullptr;
@@ -16,7 +16,7 @@ PCNN::PCNN(int _L, int* _lS, int _dS, bool _reversedOrder, bool _corruptedInput)
 	thetas[0] = nullptr;
 
 	int lSmax = layerSizes[0];
-	for (int i = 1; i < L; i++) 
+	for (int i = 1; i < L+1; i++) 
 	{
 		Xs[i] = new float[batchSize * layerSizes[i]];
 		epsilons[i] = new float[batchSize * layerSizes[i]];
@@ -37,6 +37,7 @@ PCNN::PCNN(int _L, int* _lS, int _dS, bool _reversedOrder, bool _corruptedInput)
 
 }
 
+
 void PCNN::initXs(float* datapoint, float* label)
 {
 	
@@ -44,10 +45,19 @@ void PCNN::initXs(float* datapoint, float* label)
 	if (reversedOrder) {
 		std::copy(datapoint, datapoint + layerSizes[0] * batchSize, Xs[0]);
 		
-		if (label == nullptr) std::fill(muL, muL + layerSizes[L] * batchSize, 0.0f);
-		else std::copy(label, label + layerSizes[L] * batchSize, muL);
+		if (label == nullptr)
+		{
+			std::fill(muL, muL + layerSizes[L] * batchSize, 0.0f);
+			std::fill(Xs[L], Xs[L] + layerSizes[L] * batchSize, 0.0f); // or random ? TODO
+		}
+		else {
+			std::copy(label, label + layerSizes[L] * batchSize, muL);
 
-		std::fill(Xs[L], Xs[L] + batchSize * layerSizes[L], 0.0f);
+			//std::copy(label, label + batchSize * layerSizes[L], Xs[L]);
+			//std::fill(Xs[L], Xs[L] + layerSizes[L] * batchSize, 0.0f);
+			float f = powf((float)layerSizes[L], -.5f);
+			for (int j = 0; j < batchSize * layerSizes[L]; j++) Xs[L][j] = NORMAL_01 * f;
+		}
 	}
 	else {
 		if (label == nullptr) std::fill(Xs[0], Xs[0] + layerSizes[0] * batchSize, 0.0f); // or random ? TODO
@@ -63,7 +73,7 @@ void PCNN::initXs(float* datapoint, float* label)
 	}
 }
 
-void PCNN::computeEpsilons()
+void PCNN::computeEpsilons(bool training)
 {
 	for (int i = 0; i < L; i++)
 	{
@@ -77,12 +87,12 @@ void PCNN::computeEpsilons()
 			int matID = 0;
 			offset = dp * layerSizes[i];
 			for (int j = 0; j < layerSizes[i]; j++) {
-				float s = 0.0f;
+				float mu = 0.0f;
 				for (int k = 0; k < layerSizes[i + 1]; k++) {
-					s += thetas[i+1][matID] * buffer1[k];
+					mu += thetas[i+1][matID] * buffer1[k];
 					matID++;
 				}
-				epsilons[i][offset + j] = Xs[i][offset + j] - s;
+				epsilons[i][offset + j] = Xs[i][offset + j] - mu;
 			}
 		}
 
@@ -90,30 +100,43 @@ void PCNN::computeEpsilons()
 
 	//if reversedOrder epsilon L must be computed
 	if (reversedOrder) {
-		for (int dp = 0; dp < batchSize; dp++)
+		if (training)
 		{
-			int offset = dp * layerSizes[L];
-			for (int j = 0; j < layerSizes[L]; j++) {
-				epsilons[L][offset + j] = Xs[L][offset + j] - muL[offset + j];
+			for (int dp = 0; dp < batchSize; dp++)
+			{
+				int offset = dp * layerSizes[L];
+				for (int j = 0; j < layerSizes[L]; j++) {
+					epsilons[L][offset + j] = Xs[L][offset + j] - muL[offset + j];
+				}
 			}
+		}
+		else {
+			std::fill(epsilons[L], epsilons[L] + batchSize * layerSizes[L], 0.0f);
 		}
 	}
 }
 
-float PCNN::computeEnergy()
+float PCNN::computeEnergy(bool training)
 {
 	float E = 0.0f;
 
-	computeEpsilons();
+	computeEpsilons(training);
 
-	// epsilon 0 is relevant only in reversed order,
-	// and iff we are feeding corrupted / partial inputs 
-	// to x0. When it is the case the "inference" functions
-	// must implement the delta x0 change at runtime.
-	int first_l = reversedOrder && corruptedInput ? 0 : 1;
+	// epsilon 0 is relevant iff the network is: 
+	// 
+	//  - in reversed order, and we are feeding 
+	// corrupted / partial inputs inputs to x0. 
+	// 
+	// (X)OR
+	// 
+	// - in normal order, and we are in a supervised
+	// phase, i.e. x0 is fixed to the target label.
+	int first_l = ((reversedOrder && corruptedInput) || 
+				   (!reversedOrder && training))
+		? 0 : 1;
 
-	// epsilon L exists only in reversed order.
-	int last_l = reversedOrder ? L : L-1;
+	// epsilon L exists only in reversed order, while training.
+	int last_l = (reversedOrder && training) ? L+1 : L;
 
 	for (int l = first_l; l < last_l; l++) {
 		for (int dp = 0; dp < batchSize; dp++) {
@@ -127,10 +150,32 @@ float PCNN::computeEnergy()
 }
 
 
+void PCNN::learn(float tlr, float regularization) {
+	computeEpsilons(true); // theta updates only occur when there is some sort of ground truth available.
+
+
+	for (int l = 1; l < L+1; l++)
+	{
+		for (int j = 0; j < layerSizes[l - 1]; j++) {
+			for (int k = 0; k < layerSizes[l]; k++) {
+				float s = 0.0f;
+				for (int dp = 0; dp < batchSize; dp++)
+				{
+					s += Xs[l][dp * layerSizes[l] + k] * epsilons[l - 1][dp * layerSizes[l - 1] + j];
+				}
+				thetas[l][j * layerSizes[l] + k] = tlr * s + regularization * thetas[l][j * layerSizes[l] + k];
+			}
+		}
+	}
+}
+
+
+
 void PCNN::infer_Simultaneous_DataInXL(float xlr, bool training)
 {
-	computeEpsilons();
+	computeEpsilons(training);
 
+	// update xl for l in [1, L-1]
 	for (int i = 1; i < L; i++)
 	{
 		for (int dp = 0; dp < batchSize; dp++)
@@ -165,7 +210,7 @@ void PCNN::infer_Simultaneous_DataInXL(float xlr, bool training)
 
 void PCNN::infer_Forward_DataInXL(float xlr, bool training)
 {
-	for (int l = L-2; l > 0; l--)
+	for (int l = L-1; l > 0; l--)
 	{
 		for (int dp = 0; dp < batchSize; dp++)
 		{
@@ -248,29 +293,97 @@ void PCNN::infer_Forward_DataInXL(float xlr, bool training)
 	}
 }
 
-void PCNN::learn_DataInXL(float tlr, float regularization)
+void PCNN::infer_Backward_DataInXL(float xlr, bool training) 
 {
-	computeEpsilons();
+
+	if (!training)  // x0 is updated if not fixed at the label.
+	{
+		for (int dp = 0; dp < batchSize; dp++)
+		{
+			//epsilon 0
+			int x_offset = dp * layerSizes[1];
+			int e_offset = dp * layerSizes[0];
+			for (int j = 0; j < layerSizes[1]; j++) {
+				buffer1[j] = tanhf(Xs[1][x_offset + j]); // f(x1)
+			}
+			int matID = 0;
+			for (int i = 0; i < layerSizes[0]; i++) {
+				float s = 0.0f;
+				for (int j = 0; j < layerSizes[1]; j++) {
+					s += thetas[1][matID] * buffer1[j];
+					matID++;
+				}
+				epsilons[0][e_offset + i] = Xs[0][e_offset + i] - s;
+			}
+
+			// x0 += dx0
+			x_offset = layerSizes[0] * dp;
+			for (int i = 0; i < layerSizes[0]; i++) {
+				Xs[0][x_offset + i] -= xlr * epsilons[0][x_offset + i];
+			}
+		}
+	}
 
 	for (int l = 1; l < L; l++)
 	{
-		for (int j = 0; j < layerSizes[l - 1]; j++) {
-			for (int k = 0; k < layerSizes[l]; k++) {
+		for (int dp = 0; dp < batchSize; dp++)
+		{
+			int x_offset, e_offset, matID;
+
+
+			// epsilon l
+			x_offset = dp * layerSizes[l + 1];
+			e_offset = dp * layerSizes[l];
+			for (int j = 0; j < layerSizes[l + 1]; j++) {
+				buffer1[j] = tanhf(Xs[l + 1][x_offset + j]); // f(x l+1)
+			}
+			matID = 0;
+			for (int i = 0; i < layerSizes[l]; i++) {
 				float s = 0.0f;
-				for (int dp = 0; dp < batchSize; dp++)
-				{
-					s += Xs[l][dp * layerSizes[l] + k] * epsilons[l - 1][dp * layerSizes[l - 1] + j];
+				for (int j = 0; j < layerSizes[l + 1]; j++) {
+					s += thetas[l + 1][matID] * buffer1[j];
+					matID++;
 				}
-				thetas[l][j * layerSizes[l] + k] = tlr * s + regularization * thetas[l][j * layerSizes[l] + k];
+				epsilons[l][e_offset + i] = Xs[l][e_offset + i] - s;
+			}
+
+
+			// epsilon l - 1
+			x_offset = dp * layerSizes[l];
+			e_offset = dp * layerSizes[l - 1];
+			for (int j = 0; j < layerSizes[l]; j++) {
+				buffer1[j] = tanhf(Xs[l][x_offset + j]); // f(x l+1)
+			}
+			matID = 0;
+			for (int i = 0; i < layerSizes[l - 1]; i++) {
+				float s = 0.0f;
+				for (int j = 0; j < layerSizes[l]; j++) {
+					s += thetas[l][matID] * buffer1[j];
+					matID++;
+				}
+				epsilons[l - 1][e_offset + i] = Xs[l - 1][e_offset + i] - s;
+			}
+
+
+			// compute and add deltaX l
+			for (int j = 0; j < layerSizes[l]; j++) {
+				float s = 0.0f;
+				for (int k = 0; k < layerSizes[l - 1]; k++) {
+					s += thetas[l][j + k * layerSizes[l]] * epsilons[l - 1][e_offset + k];
+				}
+
+				float dfx = 1.0f - powf(tanhf(Xs[l][x_offset + j]), 2.0f);
+				Xs[l][x_offset + j] += xlr * (dfx * s - epsilons[l][x_offset + j]);
 			}
 		}
 	}
 }
 
 
+
 void PCNN::infer_Simultaneous_DataInX0(float xlr, bool training)
 {
-	computeEpsilons();
+	computeEpsilons(training);
 
 	if (!training) {
 		std::fill(epsilons[L], epsilons[L] + batchSize * layerSizes[L], 0.0f);
@@ -278,7 +391,7 @@ void PCNN::infer_Simultaneous_DataInX0(float xlr, bool training)
 
 	// delta xl for l in [1,L]. delta x0 is to be considered iff x0 is fixed 
 	// (at least partially) to a corrupted / partial input.
-	for (int l = 1; l < L; l++)
+	for (int l = 1; l < L+1; l++)
 	{
 		for (int dp = 0; dp < batchSize; dp++)
 		{
@@ -315,6 +428,192 @@ void PCNN::infer_Simultaneous_DataInX0(float xlr, bool training)
 void PCNN::infer_Forward_DataInX0(float xlr, bool training) 
 {
 
+	// apply delta x0 if incomplete / corrupted input, ( so not during the learning phase)
+	if (corruptedInput && !training) {
+		for (int dp = 0; dp < batchSize; dp++)
+		{
+
+			int offset = dp * layerSizes[1];
+			for (int j = 0; j < layerSizes[1]; j++) {
+				buffer1[j] = tanhf(Xs[1][offset + j]); // f(x1)
+			}
+
+			offset = dp * layerSizes[0];
+			int matID = 0;
+			for (int i = 0; i < layerSizes[0]; i++) {
+				float mu = 0.0f;
+				for (int j = 0; j < layerSizes[1]; j++) {
+					mu += thetas[1][matID] * buffer1[j];
+					matID++;
+				}
+				epsilons[0][offset + i] = Xs[0][offset + i] - mu;
+
+				// x0 += dx0
+				Xs[0][offset + i] -= xlr * epsilons[0][offset + i];
+
+				epsilons[0][offset + i] = Xs[0][offset + i] - mu;
+			}
+		}
+	}
+	// otherwise at least compute epsilon 0 to prepare x1's update
+	else 
+	{ 
+		for (int dp = 0; dp < batchSize; dp++)
+		{
+
+			int offset = dp * layerSizes[1];
+			for (int j = 0; j < layerSizes[1]; j++) {
+				buffer1[j] = tanhf(Xs[1][offset + j]); // f(x1)
+			}
+
+			offset = dp * layerSizes[0];
+			int matID = 0;
+			for (int i = 0; i < layerSizes[0]; i++) {
+				float mu = 0.0f;
+				for (int j = 0; j < layerSizes[1]; j++) {
+					mu += thetas[1][matID] * buffer1[j];
+					matID++;
+				}
+
+				epsilons[0][offset + i] = Xs[0][offset + i] - mu;
+			}
+		}
+	}
+
+	// delta xl for l in [1, L-1], in ascending order
+	for (int l = 1; l < L; l++)
+	{
+		for (int dp = 0; dp < batchSize; dp++)
+		{
+			int offset = dp * layerSizes[l+1];
+			for (int j = 0; j < layerSizes[l+1]; j++) {
+				buffer1[j] = tanhf(Xs[l+1][offset + j]); // f(xl+1)
+			}
+
+
+			offset = dp * layerSizes[l];
+			int p_offset = dp * layerSizes[l-1];
+			int matID = 0;
+			for (int i = 0; i < layerSizes[l]; i++) {
+				float mu = 0.0f;
+				for (int j = 0; j < layerSizes[l+1]; j++) {
+					mu += thetas[l+1][matID] * buffer1[j];
+					matID++;
+				}
+				epsilons[l][offset + i] = Xs[l][offset + i] - mu;
+
+
+				float s = 0.0f;
+				for (int k = 0; k < layerSizes[l - 1]; k++) {
+					s += thetas[l][i + k * layerSizes[l]] * epsilons[l - 1][p_offset + k];
+				}
+
+				float dfx = 1.0f - powf(tanhf(Xs[l][offset + i]), 2.0f);
+				Xs[l][offset + i] += xlr * (dfx * s - epsilons[l][offset + i]);
+
+				epsilons[l][offset + i] = Xs[l][offset + i] - mu;
+			}
+		}
+	}
+
+	// epsilon L
+	if (!training) {
+		std::fill(epsilons[L], epsilons[L] + batchSize * layerSizes[L], 0.0f);
+	}
+	else {
+		for (int idp = 0; idp < batchSize * layerSizes[L]; idp++)
+		{
+			epsilons[L][idp] = Xs[L][idp] - muL[idp];
+		}
+	}
+	// delta xL
+	for (int dp = 0; dp < batchSize; dp++)
+	{
+
+		int offset = dp * layerSizes[L];
+		int p_offset = dp * layerSizes[L - 1];
+		int matID = 0;
+		for (int i = 0; i < layerSizes[L]; i++) {
+			
+			float s = 0.0f;
+			for (int k = 0; k < layerSizes[L - 1]; k++) {
+				s += thetas[L][i + k * layerSizes[L]] * epsilons[L - 1][p_offset + k];
+			}
+
+			float dfx = 1.0f - powf(tanhf(Xs[L][offset + i]), 2.0f);
+			Xs[L][offset + i] += xlr * (dfx * s - epsilons[L][offset + i]);
+		}
+	}
+}
+
+void PCNN::infer_Backward_DataInX0(float xlr, bool training) 
+{
+
+	// delta xL
+	if (!training) {
+		std::fill(epsilons[L], epsilons[L] + batchSize * layerSizes[L], 0.0f);
+	}
+	else {
+		for (int idp = 0; idp < batchSize * layerSizes[L]; idp++)
+		{
+			epsilons[L][idp] = Xs[L][idp] - muL[idp];
+		}
+	}
+	for (int dp = 0; dp < batchSize; dp++)
+	{
+
+		int offset = dp * layerSizes[L];
+		int p_offset = dp * layerSizes[L - 1];
+		int matID = 0;
+		for (int i = 0; i < layerSizes[L]; i++) {
+
+			float s = 0.0f;
+			for (int k = 0; k < layerSizes[L - 1]; k++) {
+				s += thetas[L][i + k * layerSizes[L]] * epsilons[L - 1][p_offset + k];
+			}
+
+			float dfx = 1.0f - powf(tanhf(Xs[L][offset + i]), 2.0f);
+			Xs[L][offset + i] += xlr * (dfx * s - epsilons[L][offset + i]);
+		}
+	}
+
+	// delta xl for l in [1, L-1], decreasing order.
+	for (int l = L-1; l > 0; l--)
+	{
+		for (int dp = 0; dp < batchSize; dp++)
+		{
+			int offset = dp * layerSizes[l + 1];
+			for (int j = 0; j < layerSizes[l + 1]; j++) {
+				buffer1[j] = tanhf(Xs[l + 1][offset + j]); // f(xl+1)
+			}
+
+
+			offset = dp * layerSizes[l];
+			int p_offset = dp * layerSizes[l - 1];
+			int matID = 0;
+			for (int i = 0; i < layerSizes[l]; i++) {
+				float mu = 0.0f;
+				for (int j = 0; j < layerSizes[l + 1]; j++) {
+					mu += thetas[l + 1][matID] * buffer1[j];
+					matID++;
+				}
+				buffer2[i] = mu;
+				epsilons[l][offset + i] = Xs[l][offset + i] - mu;
+
+
+				float s = 0.0f;
+				for (int k = 0; k < layerSizes[l - 1]; k++) {
+					s += thetas[l][i + k * layerSizes[l]] * epsilons[l - 1][p_offset + k];
+				}
+
+				float dfx = 1.0f - powf(tanhf(Xs[l][offset + i]), 2.0f);
+				Xs[l][offset + i] += xlr * (dfx * s - epsilons[l][offset + i]);
+
+				epsilons[l][offset + i] = Xs[l][offset + i] - mu;
+			}
+		}
+	}
+
 	// apply delta x0 if incomplete / corrupted input, at runtime only
 	if (corruptedInput && !training) {
 		for (int dp = 0; dp < batchSize; dp++)
@@ -340,90 +639,6 @@ void PCNN::infer_Forward_DataInX0(float xlr, bool training)
 				Xs[0][offset + i] -= xlr * epsilons[0][offset + i];
 
 				epsilons[0][offset + i] = Xs[0][offset + i] - mu;
-			}
-		}
-	}
-
-	// delta xl for l in [1, L-1]
-	for (int l = 1; l < L; l++)
-	{
-		for (int dp = 0; dp < batchSize; dp++)
-		{
-			int offset = dp * layerSizes[l+1];
-			for (int j = 0; j < layerSizes[l+1]; j++) {
-				buffer1[j] = tanhf(Xs[l+1][offset + j]); // f(xl+1)
-			}
-
-
-			offset = dp * layerSizes[l];
-			int p_offset = dp * layerSizes[l-1];
-			int matID = 0;
-			for (int i = 0; i < layerSizes[l]; i++) {
-				float mu = 0.0f;
-				for (int j = 0; j < layerSizes[l+1]; j++) {
-					mu += thetas[l+1][matID] * buffer1[j];
-					matID++;
-				}
-				buffer2[i] = mu;
-				epsilons[l][offset + i] = Xs[l][offset + i] - mu;
-
-
-				float s = 0.0f;
-				for (int k = 0; k < layerSizes[l - 1]; k++) {
-					s += thetas[l][i + k * layerSizes[l]] * epsilons[l - 1][p_offset + k];
-				}
-
-				float dfx = 1.0f - powf(tanhf(Xs[l][offset + i]), 2.0f);
-				Xs[l][offset + i] += xlr * (dfx * s - epsilons[l][offset + i]);
-
-				epsilons[l][offset + i] = Xs[l][offset + i] - mu;
-			}
-		}
-	}
-
-	// delta xL
-	if (!training) {
-		std::fill(epsilons[L], epsilons[L] + batchSize * layerSizes[L], 0.0f);
-	}
-	else {
-		for (int idp = 0; idp < batchSize * layerSizes[L]; idp++)
-		{
-			epsilons[L][idp] = Xs[L][idp] - muL[idp];
-		}
-	}
-	for (int dp = 0; dp < batchSize; dp++)
-	{
-
-		int offset = dp * layerSizes[L];
-		int p_offset = dp * layerSizes[L - 1];
-		int matID = 0;
-		for (int i = 0; i < layerSizes[L]; i++) {
-			
-			float s = 0.0f;
-			for (int k = 0; k < layerSizes[L - 1]; k++) {
-				s += thetas[L][i + k * layerSizes[L]] * epsilons[L - 1][p_offset + k];
-			}
-
-			float dfx = 1.0f - powf(tanhf(Xs[L][offset + i]), 2.0f);
-			Xs[L][offset + i] += xlr * (dfx * s - epsilons[L][offset + i]);
-		}
-	}
-}
-
-// same as learn_DataInXL
-void PCNN::learn_DataInX0(float tlr, float regularization) {
-	computeEpsilons();
-
-	for (int l = 1; l < L; l++)
-	{
-		for (int j = 0; j < layerSizes[l - 1]; j++) {
-			for (int k = 0; k < layerSizes[l]; k++) {
-				float s = 0.0f;
-				for (int dp = 0; dp < batchSize; dp++)
-				{
-					s += Xs[l][dp * layerSizes[l] + k] * epsilons[l - 1][dp * layerSizes[l - 1] + j];
-				}
-				thetas[l][j * layerSizes[l] + k] = tlr * s + regularization * thetas[l][j * layerSizes[l] + k];
 			}
 		}
 	}

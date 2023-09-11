@@ -1,8 +1,11 @@
 #pragma once
 
-#include <fstream>
-#include <string>
+#include "Random.h"
 
+#include <fstream>
+#include <algorithm>
+#include <string>
+#include <tuple>
 
 float** read_mnist_images(std::string full_path, int number_of_images) {
     auto reverseInt = [](int i) {
@@ -83,3 +86,29 @@ float** read_mnist_labels(std::string full_path, int number_of_labels) {
     }
 }
 
+std::tuple<float**, float**> create_batches(float** datapoints, float** labels, int nItems, int batchSize)
+{
+    int nBatches = nItems / batchSize;
+    float** batchedPoints = new float* [nBatches];
+    float** batchedLabels = new float* [nBatches];
+
+    std::vector<int> newIDs;
+    newIDs.reserve(nItems);
+    newIDs.resize(nItems);
+    for (int i = 0; i < nItems; i++) newIDs[i] = i;
+    std::shuffle(newIDs.begin(), newIDs.end(), generator);
+
+    for (int i = 0; i < nBatches; i++) {
+
+        batchedPoints[i] = new float[784 * batchSize];
+        batchedLabels[i] = new float[10 * batchSize];
+
+        for (int j = 0; j < batchSize; j++) {
+            int cID = i * batchSize + j;
+
+            std::copy(datapoints[newIDs[cID]], datapoints[newIDs[cID]] + 784, batchedPoints[i] + j * 784);
+            std::copy(labels[newIDs[cID]], labels[newIDs[cID]] + 10, batchedLabels[i] + j * 10);
+        }
+    }
+    return { batchedPoints, batchedLabels };
+}
