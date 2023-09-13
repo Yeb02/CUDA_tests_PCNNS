@@ -52,19 +52,28 @@ int main() {
 
 	const int batchSize = 1; 
 
-	const float xlr = .025f / (float)batchSize;
-	const float tlr = .005f / (float)batchSize; // i have noticed that if x has not converged (iPC, ...),
-	const float regularization = 1.0f - .000f; // ,tlr must be tiny, otherwise thetas explode.
+	// .1, .005 for normal order
+	const float xlr = .02f; 
+	const float tlr = .01f / (float)batchSize; // i have noticed that if x has not converged (iPC, ...),
+	const float regularization = 1.0f;// -.015f; // ,tlr must be tiny, otherwise thetas explode.
 
 	const bool corruptedInput = false;
+	int corruptedIndices[784]; // 0 where the input is corrupted, 1 otherwise.
+	float intactFraction = 1.0f / 2.0f;
+	int nCorruptedInputs = 0;
+	for (int i = 0; i < 784; i++) {
+		corruptedIndices[i] = UNIFORM_01 < intactFraction ? 1 : 0;
+		nCorruptedInputs += (1 - corruptedIndices[i]);
+	}
+
 	PCNN nn(nL-1, layerSizes, batchSize, reversedOrder, corruptedInput); // TODO regularize
 	ParamsDump pd;
 	pd.copyPCNNsThetas(nn);
 
 
-	const int nInferenceSteps = 30;
+	const int nInferenceSteps = 20;
 	const int nEpochs = 1000;
-	const int nTrainSamples = 5000, nTestSamples = 300;
+	const int nTrainSamples = 3000, nTestSamples = 600;
 	for (int e = 0 ; e < nEpochs; e++)
 	{
 
@@ -82,18 +91,19 @@ int main() {
 				else nn.infer_Simultaneous_DataInXL(xlr, true);
 			}
 			nn.learn(tlr, regularization);
-			
+
 		}
 
 		float avgL = 0.0f;
+		float reconstructionError = 0.0f;
 		int nCorrectAnswers = 0;
 		nn.batchSize = 1;
 		for (int sid = 0; sid < nTestSamples; sid++)
 		{
-			nn.initXs(testDatapoints[sid], nullptr);
+			nn.initXs(testDatapoints[sid], nullptr, corruptedIndices);
 
 			for (int i = 0; i < nInferenceSteps; i++) {
-				if (reversedOrder) nn.infer_Simultaneous_DataInX0(xlr, false);
+				if (reversedOrder) nn.infer_Simultaneous_DataInX0(xlr, false, corruptedIndices);
 				else nn.infer_Simultaneous_DataInXL(xlr, false);
 			}
 
@@ -102,10 +112,20 @@ int main() {
 				avgL += powf(nn.output[i] - testLabels[sid][i], 2.0f);
 			}
 			nCorrectAnswers += isCorrectAnswer(nn.output, testLabels[sid]);
+
+			for (int i = 0; i < 784; i++)
+			{
+				// no need to skip uncorrupted indices, as their error will evaluate to 0.
+				reconstructionError += powf(nn.input[i] - testDatapoints[sid][i], 2.0f);
+			}
+
 		}
 
-		std::cout << "Epoch " << e << " , train loss " << std::setprecision(5) << avgL / (float)nTrainSamples
-			<< " , test accuracy " << std::setprecision(4) << (float)nCorrectAnswers / (float)nTestSamples << std::endl;
+		std::cout << "Epoch " << e << " , test loss " << std::setprecision(5) << avgL / (float)nTrainSamples
+			<< " , test accuracy " << std::setprecision(4) << (float)nCorrectAnswers / (float)nTestSamples;
+		if (corruptedInput) 
+			std::cout << " , average reconstruction error " << reconstructionError / (float)(nCorruptedInputs * nTestSamples);
+		std::cout << std::endl;
 
 		for (int i = 0; i < nBatches; i++) {
 			delete[] batchedPoints[i];
@@ -171,7 +191,7 @@ int main() {
 		std::cout << "Initial energy: " << nn.computeEnergy(training) << "\n" << std::endl;
 		for (int i = 0; i < nInferenceSteps; i++) {
 			std::cout << "  F " << nn.computeEnergy(training) << std::endl;
-			nn.infer_Forward_DataInX0(xlr, training);
+			nn.infer_Forward_DataInX0(xlr, training, corruptedIndices);
 			if (iPC) nn.learn(tlr, regularization);
 		}
 		std::cout << "  F " << nn.computeEnergy(training) << "\n" << std::endl;
@@ -180,7 +200,7 @@ int main() {
 		pd.setPCNNsXs(nn, batchSize);
 		//std::cout << "  B " << nn.computeEnergy(training) << std::endl;
 		for (int i = 0; i < nInferenceSteps; i++) {
-			nn.infer_Backward_DataInX0(xlr, training);
+			nn.infer_Backward_DataInX0(xlr, training, corruptedIndices);
 			if (iPC) nn.learn(tlr, regularization);
 		}
 		std::cout << "  B " << nn.computeEnergy(training) << "\n" << std::endl;
@@ -189,7 +209,7 @@ int main() {
 		pd.setPCNNsXs(nn, batchSize);
 		for (int i = 0; i < nInferenceSteps; i++) {
 			//std::cout << "  S " << nn.computeEnergy(training) << std::endl;
-			nn.infer_Simultaneous_DataInX0(xlr, training);
+			nn.infer_Simultaneous_DataInX0(xlr, training, corruptedIndices);
 			if (iPC) nn.learn(tlr, regularization);
 		}
 		std::cout << "  S " << nn.computeEnergy(training) << std::endl;

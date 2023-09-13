@@ -7,6 +7,7 @@ PCNN::PCNN(int _L, int* _lS, int _dS, bool _reversedOrder, bool _corruptedInput)
 	Xs.resize(L+1);
 	epsilons.resize(L+1);
 	thetas.resize(L+1);
+	biases.resize(L+1);
 
 	if (reversedOrder) muL = new float[batchSize * layerSizes[L]];
 	else muL = nullptr;
@@ -14,6 +15,7 @@ PCNN::PCNN(int _L, int* _lS, int _dS, bool _reversedOrder, bool _corruptedInput)
 	Xs[0] = new float[batchSize * layerSizes[0]];
 	epsilons[0] = new float[batchSize * layerSizes[0]];
 	thetas[0] = nullptr;
+	biases[L] = nullptr;
 
 	int lSmax = layerSizes[0];
 	for (int i = 1; i < L+1; i++) 
@@ -23,8 +25,16 @@ PCNN::PCNN(int _L, int* _lS, int _dS, bool _reversedOrder, bool _corruptedInput)
 
 		int tS = layerSizes[i - 1] * layerSizes[i];
 		thetas[i] = new float[tS];
-		float f = powf((float)tS, -.5f); // HE init
-		for (int j = 0; j < tS; j++) thetas[i][j] = NORMAL_01 * f;
+		biases[i-1] = new float[layerSizes[i-1]];
+
+		//float f = powf((float)tS, -.5f); // HE init
+		//for (int j = 0; j < tS; j++) thetas[i][j] = NORMAL_01 * f;
+
+		// https://www.mrcbndu.ox.ac.uk/sites/default/files/pdf_files/Whittington%20Bogacz%202017_Neural%20Comput.pdf
+		float b = 8.0f * sqrtf(6.0f / (float)(layerSizes[i - 1] + layerSizes[i]));
+		for (int j = 0; j < tS; j++) thetas[i][j] = (UNIFORM_01 - .5f) * b;
+
+		for (int j = 0; j < layerSizes[i-1]; j++) biases[i-1][j] = (UNIFORM_01 - .5f)*.2f;
 
 		if (layerSizes[i] > lSmax) lSmax = layerSizes[i];
 	}
@@ -32,31 +42,51 @@ PCNN::PCNN(int _L, int* _lS, int _dS, bool _reversedOrder, bool _corruptedInput)
 	buffer1 = new float[lSmax];
 	buffer2 = new float[lSmax];
 
-	if (reversedOrder) output = Xs[L];
-	else output = Xs[0];
+	if (reversedOrder) {
+		output = Xs[L];
+		input = Xs[0];
+	}
+	else {
+		output = Xs[0];
+		input = Xs[L];
+	}
 
 }
 
 
-void PCNN::initXs(float* datapoint, float* label)
+void PCNN::initXs(float* datapoint, float* label, int* corruptedIndices)
 {
 	
 
 	if (reversedOrder) {
-		std::copy(datapoint, datapoint + layerSizes[0] * batchSize, Xs[0]);
 		
+		if (corruptedInput && corruptedIndices!=nullptr) {
+			for (int dp = 0; dp < batchSize; dp++) {
+				int offset = dp * layerSizes[0];
+				for (int i = 0; i < layerSizes[0]; i++) {
+					Xs[0][offset + i] = (float)corruptedIndices[i] * datapoint[offset + i];
+				}
+			}
+		}
+		else {
+			std::copy(datapoint, datapoint + layerSizes[0] * batchSize, Xs[0]);
+		}
+
 		if (label == nullptr)
 		{
 			std::fill(muL, muL + layerSizes[L] * batchSize, 0.0f);
-			std::fill(Xs[L], Xs[L] + layerSizes[L] * batchSize, 0.0f); // or random ? TODO
+
+			//std::fill(Xs[L], Xs[L] + layerSizes[L] * batchSize, 0.0f);
+			float f = powf((float)layerSizes[L], -.5f);
+			for (int j = 0; j < batchSize * layerSizes[L]; j++) Xs[L][j] = NORMAL_01 * f;
 		}
 		else {
 			std::copy(label, label + layerSizes[L] * batchSize, muL);
 
-			//std::copy(label, label + batchSize * layerSizes[L], Xs[L]);
+			std::copy(label, label + batchSize * layerSizes[L], Xs[L]);
 			//std::fill(Xs[L], Xs[L] + layerSizes[L] * batchSize, 0.0f);
-			float f = powf((float)layerSizes[L], -.5f);
-			for (int j = 0; j < batchSize * layerSizes[L]; j++) Xs[L][j] = NORMAL_01 * f;
+			/*float f = powf((float)layerSizes[L], -.5f);
+			for (int j = 0; j < batchSize * layerSizes[L]; j++) Xs[L][j] = NORMAL_01 * f;*/
 		}
 	}
 	else {
@@ -66,10 +96,11 @@ void PCNN::initXs(float* datapoint, float* label)
 		std::copy(datapoint, datapoint + layerSizes[L] * batchSize, Xs[L]);
 	}
 
-	for (int i = 1; i < L; i++)
+	for (int l = 1; l < L; l++)
 	{
-		float f = powf((float)layerSizes[i], -.5f);
-		for (int j = 0; j < batchSize * layerSizes[i]; j++) Xs[i][j] = NORMAL_01 * f;
+		float f = powf((float)layerSizes[l], -.5f);
+		for (int j = 0; j < batchSize * layerSizes[l]; j++) Xs[l][j] = NORMAL_01 * f;
+		//std::fill(Xs[l], Xs[l] + layerSizes[l] * batchSize, 0.0f);
 	}
 }
 
@@ -87,7 +118,7 @@ void PCNN::computeEpsilons(bool training)
 			int matID = 0;
 			offset = dp * layerSizes[i];
 			for (int j = 0; j < layerSizes[i]; j++) {
-				float mu = 0.0f;
+				float mu = biases[i][j];
 				for (int k = 0; k < layerSizes[i + 1]; k++) {
 					mu += thetas[i+1][matID] * buffer1[k];
 					matID++;
@@ -156,15 +187,25 @@ void PCNN::learn(float tlr, float regularization) {
 
 	for (int l = 1; l < L+1; l++)
 	{
+		for (int dp = 0; dp < batchSize; dp++)
+		{
+			for (int k = 0; k < layerSizes[l]; k++) {
+				buffer1[k] = tanhf(Xs[l][dp * layerSizes[l] + k]);
+			}
+
+			for (int j = 0; j < layerSizes[l - 1]; j++) {
+				for (int k = 0; k < layerSizes[l]; k++) {
+					thetas[l][j * layerSizes[l] + k] +=
+						tlr * Xs[l][dp * layerSizes[l] + k] * epsilons[l - 1][dp * layerSizes[l - 1] + j];
+				}
+				biases[l - 1][j] += tlr * epsilons[l - 1][dp * layerSizes[l - 1] + j];
+			}
+		}
 		for (int j = 0; j < layerSizes[l - 1]; j++) {
 			for (int k = 0; k < layerSizes[l]; k++) {
-				float s = 0.0f;
-				for (int dp = 0; dp < batchSize; dp++)
-				{
-					s += Xs[l][dp * layerSizes[l] + k] * epsilons[l - 1][dp * layerSizes[l - 1] + j];
-				}
-				thetas[l][j * layerSizes[l] + k] = tlr * s + regularization * thetas[l][j * layerSizes[l] + k];
+				thetas[l][j * layerSizes[l] + k] *= regularization;
 			}
+			biases[l - 1][j] *= regularization;
 		}
 	}
 }
@@ -381,7 +422,7 @@ void PCNN::infer_Backward_DataInXL(float xlr, bool training)
 
 
 
-void PCNN::infer_Simultaneous_DataInX0(float xlr, bool training)
+void PCNN::infer_Simultaneous_DataInX0(float xlr, bool training, int* corruptedIndices)
 {
 	computeEpsilons(training);
 
@@ -389,9 +430,9 @@ void PCNN::infer_Simultaneous_DataInX0(float xlr, bool training)
 		std::fill(epsilons[L], epsilons[L] + batchSize * layerSizes[L], 0.0f);
 	}
 
-	// delta xl for l in [1,L]. delta x0 is to be considered iff x0 is fixed 
-	// (at least partially) to a corrupted / partial input.
-	for (int l = 1; l < L+1; l++)
+	// delta xl for l in [1,L]. epsilons being precomputed, 
+	// order does not matter. All could happen in parallel.
+	for (int l = 1; l < L+1; l++) // L+(training?0:1) fixes xL at the label (if correctly initialized) during training.
 	{
 		for (int dp = 0; dp < batchSize; dp++)
 		{
@@ -411,13 +452,15 @@ void PCNN::infer_Simultaneous_DataInX0(float xlr, bool training)
 		}
 	}
 
+	// delta x0 is to be considered iff x0 is fixed 
+	// (at least partially) to a corrupted / partial input.
 	if (corruptedInput && !training) {
 		for (int dp = 0; dp < batchSize; dp++)
 		{
 			int x_offset = dp * layerSizes[0];
 
 			for (int j = 0; j < layerSizes[0]; j++) {
-
+				if (corruptedIndices[j] == 1) [[unlikely]] continue;
 				float dfx = 1.0f - powf(tanhf(Xs[0][x_offset + j]), 2.0f);
 				Xs[0][x_offset + j] -= xlr * epsilons[0][x_offset + j];
 			}
@@ -425,7 +468,7 @@ void PCNN::infer_Simultaneous_DataInX0(float xlr, bool training)
 	}
 }
 
-void PCNN::infer_Forward_DataInX0(float xlr, bool training) 
+void PCNN::infer_Forward_DataInX0(float xlr, bool training, int* corruptedIndices)
 {
 
 	// apply delta x0 if incomplete / corrupted input, ( so not during the learning phase)
@@ -546,7 +589,7 @@ void PCNN::infer_Forward_DataInX0(float xlr, bool training)
 	}
 }
 
-void PCNN::infer_Backward_DataInX0(float xlr, bool training) 
+void PCNN::infer_Backward_DataInX0(float xlr, bool training, int* corruptedIndices)
 {
 
 	// delta xL

@@ -18,6 +18,7 @@ private:
 	std::vector<float*> Xs; // Size L+1
 	std::vector<float*> epsilons; // Size L+1
 	std::vector<float*> thetas; // Size L+1, but the first element is nullptr
+	std::vector<float*> biases; // Size L+1, but the last  element is nullptr
 
 	float* buffer1; // array to store temporary values during inference.
 	float* buffer2; // array to store temporary values during inference.
@@ -35,6 +36,7 @@ public:
 	int batchSize; // size of the batch, if > 1 iPC should be used.
 
 	float* output;
+	float* input;
 
 	~PCNN() 
 	{
@@ -42,6 +44,7 @@ public:
 			delete[] Xs[i];
 			delete[] epsilons[i];
 			delete[] thetas[i];
+			delete[] biases[i];
 		}
 
 		delete[] buffer1;	
@@ -51,7 +54,7 @@ public:
 
 	PCNN(int _nL, int* _lS, int _datasetSize, bool _reversedOrder, bool _corruptedInput = false);
 
-	void initXs(float* datapoint, float* label=nullptr);
+	void initXs(float* datapoint, float* label=nullptr, int* corruptedIndices = nullptr);
 
 	// for testing purposes only
 	float computeEnergy(bool training);
@@ -75,13 +78,13 @@ public:
 
 
 	// updates all Xs simultaneously, when x0 is the datapoint 
-	void infer_Simultaneous_DataInX0(float xlr, bool training);
+	void infer_Simultaneous_DataInX0(float xlr, bool training, int* corruptedIndices = nullptr);
 
 	// updates Xs in a forward fashion, when x0 is the datapoint 
-	void infer_Forward_DataInX0(float xlr, bool training);
+	void infer_Forward_DataInX0(float xlr, bool training, int* corruptedIndices = nullptr);
 
 	// updates Xs in a backward fashion, when x0 is the datapoint 
-	void infer_Backward_DataInX0(float xlr, bool training);
+	void infer_Backward_DataInX0(float xlr, bool training, int* corruptedIndices = nullptr);
 };
 
 
