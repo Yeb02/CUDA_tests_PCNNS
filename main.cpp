@@ -52,10 +52,12 @@ int main() {
 
 	const int batchSize = 1; 
 
-	// .1, .005 for normal order
-	const float xlr = .02f; 
-	const float tlr = .01f / (float)batchSize; // i have noticed that if x has not converged (iPC, ...),
-	const float regularization = 1.0f;// -.015f; // ,tlr must be tiny, otherwise thetas explode.
+	// at batch size 1:
+	// .1, .005, 1-0    for normal   order. 20 steps.
+	// .1, .005, 1-.015 for reversed order. 20 steps.
+	const float xlr = .01f; 
+	const float tlr = .05f / (float)batchSize; // i have noticed that if x has not converged (iPC, ...),
+	const float regularization = 1.0f -.015f; // ,tlr must be tiny, otherwise thetas explode.
 
 	const bool corruptedInput = false;
 	int corruptedIndices[784]; // 0 where the input is corrupted, 1 otherwise.
@@ -73,7 +75,7 @@ int main() {
 
 	const int nInferenceSteps = 20;
 	const int nEpochs = 1000;
-	const int nTrainSamples = 3000, nTestSamples = 600;
+	const int nTrainSamples = 5000, nTestSamples = 1000;
 	for (int e = 0 ; e < nEpochs; e++)
 	{
 
@@ -87,7 +89,7 @@ int main() {
 			nn.initXs(batchedPoints[sid], batchedLabels[sid]);
 
 			for (int i = 0; i < nInferenceSteps; i++) {
-				if (reversedOrder) nn.infer_Simultaneous_DataInX0(xlr, true);
+				if (reversedOrder) nn.infer_Forward_DataInX0(xlr, true);
 				else nn.infer_Simultaneous_DataInXL(xlr, true);
 			}
 			nn.learn(tlr, regularization);
@@ -103,7 +105,7 @@ int main() {
 			nn.initXs(testDatapoints[sid], nullptr, corruptedIndices);
 
 			for (int i = 0; i < nInferenceSteps; i++) {
-				if (reversedOrder) nn.infer_Simultaneous_DataInX0(xlr, false, corruptedIndices);
+				if (reversedOrder) nn.infer_Forward_DataInX0(xlr, false, corruptedIndices);
 				else nn.infer_Simultaneous_DataInXL(xlr, false);
 			}
 
@@ -121,7 +123,7 @@ int main() {
 
 		}
 
-		std::cout << "Epoch " << e << " , test loss " << std::setprecision(5) << avgL / (float)nTrainSamples
+		std::cout << "Epoch " << e << " , test loss " << std::setprecision(5) << avgL / (float)nTestSamples
 			<< " , test accuracy " << std::setprecision(4) << (float)nCorrectAnswers / (float)nTestSamples;
 		if (corruptedInput) 
 			std::cout << " , average reconstruction error " << reconstructionError / (float)(nCorruptedInputs * nTestSamples);
