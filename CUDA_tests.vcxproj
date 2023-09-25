@@ -87,6 +87,7 @@
     <ClCompile Include="Random.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Config.h" />
     <ClInclude Include="MNIST.h" />
     <ClInclude Include="Network.h" />
     <ClInclude Include="PCNN.h" />

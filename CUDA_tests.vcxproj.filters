@@ -32,5 +32,8 @@
     <ClInclude Include="Network.h">
       <Filter>PC</Filter>
     </ClInclude>
+    <ClInclude Include="Config.h">
+      <Filter>PC</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
