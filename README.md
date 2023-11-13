@@ -10,6 +10,6 @@ From the [variational inference](https://arxiv.org/pdf/2202.09467.pdf) point of 
 ### Order of propagation
 
 At each inference step, activations are modified along the gradient to minimize the free energy. This modification happens simultaneously at all layers, since we consider the energy as a function of all activations. We could instead consider it as a function of only the first layer's activations, then only of the second layer's, and so on. While it decreases the potential parallelization of the algorithm, and the quality of the energy minimization, there are also advantages. The most important being that information travels much faster through the network:  in one inference step, the update at the $L$-th layer is already a function of the activations of the $0$-th layer. On the other hand, when updates are simultaneous, it takes $L$ inference steps for information to reach the other end of the network. <br>
-This property may not be of much interest when studying supervised learning, but could prove useful when the network is the cognitive module of an agent in a reinforcement learning setting, where reaction time matters.
-
-biological plausibility
+This property may not be of much interest when studying supervised learning, but could prove useful when the network is the cognitive module of an agent in a reinforcement learning setting, where reaction time matters. <br> 
+<br>
+It also could be more biologicaly plausible, but I am not knowledgable enough to conclude.
